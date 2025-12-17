@@ -20,9 +20,7 @@ class SpatialGraphBuilder:
             edge_index = knn_graph(pos, k=self.k)
         elif method == 'rknn':
             edge_index = radius_graph(pos, r=self.radius, max_num_neighs=self.max_num_neighs)
-        
         edge_index = edge_index.to(torch.long)
-        
         if self.self_loops:
             edge_index, _ = add_self_loops(edge_index, num_nodes=N)
             
@@ -30,7 +28,6 @@ class SpatialGraphBuilder:
                     pos=pos, 
                     edge_index=edge_index,
                     num_nodes=N)
-        
         return data
     
 
@@ -39,6 +36,8 @@ class MultiScaleNicheProcessor:
     def __init__(self, k_list, x, edge_list):
         self.k_list = k_list
         
+    def compute(self):
+        pass
 
 # batch construct for training
 class BatchCollater:

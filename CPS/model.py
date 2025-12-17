@@ -7,28 +7,51 @@ from .module import *
 
 
 class FourierFeatureEncoding(nn.Module):
-    def __init__(self, in_dim=2, num_frequencies=10, sigma=1.0):
+    def __init__(self, in_dim=2, num_frequencies=32, sigma=1.0):
         super().__init__()
+        self.in_dim = in_dim
         self.n_freq = num_frequencies
-        self.out_dim = in_dim * (2*num_frequencies) + in_dim
+        self.sigma = sigma
         
-        self.register_buffer('freq_weights', torch.randn(in_dim, num_frequencies) * sigma)
+        B = torch.randn(num_frequencies, in_dim) * sigma
+        self.register_buffer('B', B, persistent=True)
     
-    def forward(self, coords):
-        scaled = 2 * torch.pi * coords @ self.freq_weights # (N, n_freq)
-        sin_enc = torch.sin(scaled)
-        cos_enc = torch.cos(scaled)
-        
-        encoded = torch.cat([coords, 
-                             sin_enc.reshape(coords.shape[0], -1), 
-                             cos_enc.reshape(coords.shape[0], -1)], 
-                            dim=-1)
-        
-        return encoded
+    def out_dim(self):
+        return self.in_dim * self.num_frequencies
+
+    def forward(self, coords):  # coords: [N, in_dim]
+        scaled = (2.0 * torch.pi) * (coords @ self.B.t())       # (N, n_freq)
+        encoded = torch.cat([torch.cos(scaled), torch.sin(scaled)], dim=-1)
+        return encoded          # (N, in_dim*n_freq)
 
 
+class StudentINR(nn.Module):
+    def __init__(self, coord_dim, latent_dim, num_freq, fourier_sigma):
+        super().__init__()
+        self.fourier = FourierFeatureEncoding(in_dim=coord_dim,
+                                              num_frequencies=num_freq,
+                                              sigma=fourier_sigma)
+        enc_dim = self.fourier.out_dim()
+        self.mlp = self._make_mlp(hidden_dims=[256, 256, 256], act=nn.SiLU(), 
+                                  in_dim=coord_dim, out_dim=latent_dim)
+    
+    def _make_mlp(self, hidden_dims, act, in_dim, out_dim):
+        layers = []
+        d = in_dim
+        for h in hidden_dims:
+            layers += [nn.Linear(d, h), act]
+            d = h
+        layers += [nn.Linear(d, out_dim)]
+        return nn.Sequential(*layers)
+    
+    def forward(self, pos):
+        enc = self.fourier(pos)
+        return self.mlp(enc)    # (N, l_dim)
+
+
+# ! consider large scale dataset
 class MultiScaleSSGConv(nn.Module):
-    def __init__(self, in_dim, out_dim, k_list, dropout=0.1):
+    def __init__(self, in_dim, out_dim, k_list, dropout, add_self_loops=True):
         super().__init__()
         self.k_list = k_list
         
@@ -36,14 +59,13 @@ class MultiScaleSSGConv(nn.Module):
                                             out_channels=out_dim,
                                             K=k,
                                             alpha=0.1, 
-                                            cached=False) for k in k_list])
+                                            cached=False,
+                                            add_self_loops=add_self_loops) for k in k_list])
         
         self.norms = nn.ModuleList([BatchNorm(out_dim) for _ in k_list])
-        
         self.dropout = nn.Dropout(dropout)
-        
         self.activation = nn.GELU()
-        
+    
     def forward(self, x, edge_index):
         feature = []
         for conv, norm in zip(self.convs, self.norms):
@@ -55,8 +77,8 @@ class MultiScaleSSGConv(nn.Module):
         return feature
     
 
-class NicheCrossAttention(nn.Module):
-    def __init__(self, in_dim, out_dim, k_list, num_heads, dropout, share_weights=False):
+class TeacherNicheAttention(nn.Module):
+    def __init__(self, in_dim, out_dim, k_list, num_heads, dropout, share_weights=False, prep_scale=False):
         super().__init__()
         self.in_dim = in_dim
         self.out_dim = out_dim
@@ -65,17 +87,21 @@ class NicheCrossAttention(nn.Module):
         self.num_heads = num_heads
         self.head_dim = out_dim // num_heads
         self.share_weights = share_weights
+        self.prep_scale = prep_scale
         
-        self.multi_scale_convs = MultiScaleSSGConv(
-            in_dim, out_dim, k_list, dropout)
+        if not prep_scale:
+            self.multi_scale_convs = MultiScaleSSGConv(
+                in_dim, out_dim, k_list, dropout)
+        else:
+            self.gene_proj = nn.Linear(in_dim, out_dim)
         
         if share_weights:
-            self.query_proj = nn.Linear(in_dim, out_dim)
+            self.query_proj = nn.Linear(out_dim, out_dim)
             self.key_proj = nn.Linear(out_dim, out_dim)
             self.value_proj = nn.Linear(out_dim, out_dim)
         else:
             self.query_projs = nn.ModuleList([
-                nn.Linear(in_dim, out_dim) for _ in k_list
+                nn.Linear(out_dim, out_dim) for _ in k_list
             ])
             self.key_projs = nn.ModuleList([
                 nn.Linear(out_dim, out_dim) for _ in k_list
@@ -85,17 +111,17 @@ class NicheCrossAttention(nn.Module):
             ])
         
         self.out_proj = nn.Linear(out_dim, out_dim)
-        
         self.residual = nn.Linear(in_dim, out_dim) if in_dim != out_dim else nn.Identity()
-        
         self.dropout = nn.Dropout(dropout)
-        
         self.norm = LayerNorm(out_dim)
         
-    def forward(self, x, edge_index, return_weights=True):
+    def forward(self, x, edge_index=None, return_weights=True):
         N = x.shape[0]
-        multi_scale_features = self.multi_scale_convs(x, edge_index) # list[(N, l_dim)]
-        scale_features = torch.stack(multi_scale_features, dim=1) # (N, S, D)
+        if not self.prep_scale:
+            multi_scale_features = self.multi_scale_convs(x, edge_index) # list[(N, D)]
+            scale_features = torch.stack(multi_scale_features, dim=1) # (N, S, D)
+        else:
+            scale_features = self.gene_proj(x)  # (N, S, D)
         
         if self.share_weights:
             query = self.query_proj(x).reshape(N, self.num_heads, self.head_dim) # (N, H, D_h)
@@ -131,57 +157,54 @@ class NicheCrossAttention(nn.Module):
             return output, attn_weights
         else:
             return output, None
-        
+
 
 class SharedDecoder(nn.Module):
     def __init__(self, in_dim, out_dim, hid_dims=[256,512]):
         super().__init__()
+        self.decoder = self._make_mlp(hidden_dims=hid_dims, act=nn.SiLU(),
+                                      in_dim=in_dim, out_dim=out_dim)
+    
+    def _make_mlp(self, hidden_dims, act, in_dim, out_dim):
         layers = []
-        
-        for _ ,h_dim in enumerate(hid_dims):
-            layers.append(nn.Linear(in_dim, h_dim))
-            layers.append(nn.LayerNorm(h_dim))
-            layers.append(nn.GELU())
-            in_dim = h_dim
-            
-        layers.append(nn.Linear(hid_dims[-1], out_dim))
-        self.decoder = nn.Sequential(*layers)
+        d = in_dim
+        for h in hidden_dims:
+            layers += [nn.Linear(d, h), nn.LayerNorm(h), act]
+            d = h
+        layers += [nn.Linear(d, out_dim)]
+        return nn.Sequential(*layers)
         
     def forward(self, z):
         return self.decoder(z)
-    
+
+
 class CPSModel(nn.Module):
-    def __init__(self, num_genes, latent_dim, 
-                 teacher_hidden, teacher_k_list, teacher_num_layers, teacher_num_heads,
-                 student_num_layers, student_num_heads, student_hid_dims,
-                 decoder_hid_dims, num_frequencies, lambda_distill, dropout):
+    def __init__(self, args):
         super().__init__()
+        self.args = args
+        self.teacher = TeacherNicheAttention(in_dim=args.hvgs, out_dim=args.latent_dim,
+                                           k_list=args.k_list, num_heads=args.num_heads,
+                                           dropout=args.dropout, share_weights=True,
+                                           prep_scale=args.prep_scale)
         
-        self.lambda_distill = lambda_distill
-        self.num_genes = num_genes
+        self.student = StudentINR(coord_dim=args.coord_dim, latent_dim=args.latent_dim,
+                                  num_freq=args.freq, fourier_sigma=args.sigma)
         
-        self.teacher = NicheCrossAttention(in_dim=num_genes, out_dim=teacher_hidden,
-                                           k_list=teacher_k_list, num_heads=teacher_num_heads,
-                                           dropout=dropout, share_weights=True)
+        self.decoder = SharedDecoder(in_dim=args.latent_dim, out_dim=args.hvgs,
+                                     hid_dims=args.latent_dim)
         
-        self.student = FourierFeatureEncoding(in_dim=2, num_frequencies=num_frequencies,
-                                              sigma=1.0)
-        
-        self.decoder = SharedDecoder(in_dim=latent_dim, out_dim=num_genes,
-                                     hid_dims=decoder_hid_dims)
-        
-        self.projection_head = nn.Sequential(nn.Linear(latent_dim, latent_dim),
+        self.projection_head = nn.Sequential(nn.Linear(args.latent_dim, args.latent_dim),
                                              nn.ReLU(),
-                                             nn.Linear(latent_dim, latent_dim) 
-        ) if lambda_distill > 0 else None
+                                             nn.Linear(args.latent_dim, args.latent_dim) 
+        ) if args.distill == 0 else None
         
-    def forward(self, mode='train', data=None, coordinates=None, return_attn=True):
+    def forward(self, coords, x=None, edge_index=None, mode='infer', return_attn=False):
         results = {}
         if mode == 'train':
-            z_teacher, attn_weights = self.teacher(data.x, data.edge_index)
+            z_teacher, attn_weights = self.teacher(x, edge_index)
             recon_teacher = self.decoder(z_teacher)
 
-            z_student = self.student(coordinates)
+            z_student = self.student(coords)
             recon_student = self.decoder(z_student)
             
             if self.projection_head is not None:
@@ -201,8 +224,8 @@ class CPSModel(nn.Module):
             if return_attn and attn_weights is not None:
                 results['attn_weights'] = attn_weights
                 
-        elif mode == 'inference':
-            z_student = self.student(coordinates)
+        elif mode == 'infer':
+            z_student = self.student(coords)
             recon_student = self.decoder(z_student)
             
             results.update({
@@ -211,6 +234,7 @@ class CPSModel(nn.Module):
             })
         
         return results
+    
 
     def compute_losses(self, pred_dict, gene_expr, recon_weight):
         losses = {}
