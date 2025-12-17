@@ -3,14 +3,7 @@ from torch_geometric.nn import knn_graph, radius_graph
 from torch_geometric.utils import add_self_loops, dense_to_sparse
 from torch_geometric.data import Data, Batch
 
-
-class MultiScaleNicheProcessor:
-    def __init__(self, k_list, x, edge_list):
-        self.k_list = k_list
-        
-
-
-
+# constract spatial graph using location
 class SpatialGraphBuilder:
     def __init__(self, k, radius, max_num_neighs, self_loops, norm):
         self.k = k
@@ -41,6 +34,13 @@ class SpatialGraphBuilder:
         return data
     
 
+# preproduce the multi-scale features using ssgconv (APPNP)
+class MultiScaleNicheProcessor:
+    def __init__(self, k_list, x, edge_list):
+        self.k_list = k_list
+        
+
+# batch construct for training
 class BatchCollater:
     def __init__(self, follow_batch=None, exclude_keys=None):
         self.follow_batch = follow_batch or []
@@ -53,3 +53,9 @@ class BatchCollater:
         return Batch.from_data_list(batch, 
                                    follow_batch=self.follow_batch,
                                    exclude_keys=self.exclude_keys)
+        
+        
+# mask for cell and genes
+class DataPerturb:
+    def __init__(self):
+        pass

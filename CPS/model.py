@@ -1,8 +1,9 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch_geometric.nn import SGConv, SSGConv, GCNConv, BatchNorm, LayerNorm
+from torch_geometric.nn import SSGConv, BatchNorm, LayerNorm
 import numpy as np
+from .module import *
 
 
 class FourierFeatureEncoding(nn.Module):
@@ -25,7 +26,7 @@ class FourierFeatureEncoding(nn.Module):
         
         return encoded
 
-# ! 解决 大图预读取问题 （12-14）
+
 class MultiScaleSSGConv(nn.Module):
     def __init__(self, in_dim, out_dim, k_list, dropout=0.1):
         super().__init__()
