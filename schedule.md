@@ -12,11 +12,13 @@
 - 12.16
 > SSGConv study and research.
 
-
 - 12.17
 > code framework and ref code of stage
 
 - **! ToDo**
-1. stage code and analysis
-2. cps code framework
-3. 
+1. stage code and analysis - todo
+2. cps code framework - finish
+
+- 12.18
+> DLPFC experiment complete: SI, GI, DeNoise
+> Large scale data preprocess (multi-scale graph data)

@@ -234,7 +234,6 @@ class CPSModel(nn.Module):
             })
         
         return results
-    
 
     def compute_losses(self, pred_dict, gene_expr, recon_weight):
         losses = {}
