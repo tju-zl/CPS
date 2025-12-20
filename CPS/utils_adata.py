@@ -1,33 +1,35 @@
 import torch
 from torch_geometric.nn import knn_graph, radius_graph
-from torch_geometric.utils import add_self_loops, dense_to_sparse
+from torch_geometric.utils import add_self_loops, dense_to_sparse, to_undirected
 from torch_geometric.data import Data, Batch
 
 # constract spatial graph using location
 class SpatialGraphBuilder:
-    def __init__(self, k, radius, max_num_neighs, self_loops, norm):
-        self.k = k
-        self.radius = radius
-        self.max_num_neighs = max_num_neighs
-        self.self_loops = self_loops
-        self.norm = norm
+    def __init__(self, args):
+        self.max_neighbors = args.max_neighbors
+        self.radius = args.radius
+        self.self_loops = args.self_loops
+        self.flow = args.flow
     
-    def build_graph(self, coordinates, gene_exp, method):
-        N = len(coordinates)
-        pos = torch.tensor(coordinates, dtype=torch.float)
+    def build_single_graph(self, adata, method='rknn'):
+        pos = torch.FloatTensor(adata.obsm['spatial'])
         
         if method == 'knn':
-            edge_index = knn_graph(pos, k=self.k)
-        elif method == 'rknn':
-            edge_index = radius_graph(pos, r=self.radius, max_num_neighs=self.max_num_neighs)
-        edge_index = edge_index.to(torch.long)
-        if self.self_loops:
-            edge_index, _ = add_self_loops(edge_index, num_nodes=N)
+            edge_index = knn_graph(pos, k=self.max_neighbors, flow=self.flow)
+            edge_index = to_undirected(edge_index)
             
-        data = Data(x=torch.tensor(gene_exp, dtype=torch.float),
-                    pos=pos, 
+        elif method == 'rknn':
+            edge_index = radius_graph(pos, r=self.radius, max_num_neighbors=self.max_neighbors, flow=self.flow)
+            edge_index = to_undirected(edge_index)
+        
+        if self.self_loops:
+            edge_index, _ = add_self_loops(edge_index, num_nodes=adata.n_obs)
+            
+        data = Data(x=torch.tensor(adata.obsm['hvg_features'], dtype=torch.float),
+                    pos=pos,
                     edge_index=edge_index,
-                    num_nodes=N)
+                    num_nodes=adata.n_obs, 
+                    num_genes=adata.obsm['hvg_features'].shape[1])
         return data
     
 

@@ -17,7 +17,7 @@ class FourierFeatureEncoding(nn.Module):
         self.register_buffer('B', B, persistent=True)
     
     def out_dim(self):
-        return self.in_dim * self.num_frequencies
+        return self.in_dim * self.n_freq
 
     def forward(self, coords):  # coords: [N, in_dim]
         scaled = (2.0 * torch.pi) * (coords @ self.B.t())       # (N, n_freq)
@@ -26,13 +26,13 @@ class FourierFeatureEncoding(nn.Module):
 
 
 class StudentINR(nn.Module):
-    def __init__(self, coord_dim, latent_dim, num_freq, fourier_sigma):
+    def __init__(self, coord_dim, latent_dim, num_freq, fourier_sigma, inr_latent):
         super().__init__()
         self.fourier = FourierFeatureEncoding(in_dim=coord_dim,
                                               num_frequencies=num_freq,
                                               sigma=fourier_sigma)
         enc_dim = self.fourier.out_dim()
-        self.mlp = self._make_mlp(hidden_dims=[256, 256, 256], act=nn.SiLU(), 
+        self.mlp = self._make_mlp(hidden_dims=inr_latent, act=nn.SiLU(), 
                                   in_dim=coord_dim, out_dim=latent_dim)
     
     def _make_mlp(self, hidden_dims, act, in_dim, out_dim):
@@ -160,7 +160,7 @@ class TeacherNicheAttention(nn.Module):
 
 
 class SharedDecoder(nn.Module):
-    def __init__(self, in_dim, out_dim, hid_dims=[256,512]):
+    def __init__(self, in_dim, out_dim, hid_dims=[256, 512]):
         super().__init__()
         self.decoder = self._make_mlp(hidden_dims=hid_dims, act=nn.SiLU(),
                                       in_dim=in_dim, out_dim=out_dim)
@@ -188,67 +188,40 @@ class CPSModel(nn.Module):
                                            prep_scale=args.prep_scale)
         
         self.student = StudentINR(coord_dim=args.coord_dim, latent_dim=args.latent_dim,
-                                  num_freq=args.freq, fourier_sigma=args.sigma)
+                                  num_freq=args.freq, fourier_sigma=args.sigma,
+                                  inr_latent=args.inr_latent)
         
         self.decoder = SharedDecoder(in_dim=args.latent_dim, out_dim=args.hvgs,
-                                     hid_dims=args.latent_dim)
+                                     hid_dims=args.decoder_latent)
         
         self.projection_head = nn.Sequential(nn.Linear(args.latent_dim, args.latent_dim),
                                              nn.ReLU(),
                                              nn.Linear(args.latent_dim, args.latent_dim) 
         ) if args.distill == 0 else None
         
-    def forward(self, coords, x=None, edge_index=None, mode='infer', return_attn=False):
+    def forward(self, coords, x=None, edge_index=None, return_attn=False):
         results = {}
-        if mode == 'train':
-            z_teacher, attn_weights = self.teacher(x, edge_index)
-            recon_teacher = self.decoder(z_teacher)
+        z_teacher, attn_weights = self.teacher(x, edge_index)
+        recon_teacher = self.decoder(z_teacher)
 
-            z_student = self.student(coords)
-            recon_student = self.decoder(z_student)
-            
-            if self.projection_head is not None:
-                z_teacher_proj = F.normalize(self.projection_head(z_teacher), dim=-1)
-                z_student_proj = F.normalize(self.projection_head(z_student), dim=-1)
-                distill_loss = 1 - F.cosine_similarity(z_teacher_proj, z_student_proj).mean()
-            else:
-                distill_loss = F.mse_loss(z_student, z_teacher.detach())
-                
-            results.update({
-                'z_teacher': z_teacher,
-                'z_student': z_student,
-                'recon_teacher': recon_teacher,
-                'recon_student': recon_student,
-                'distill_loss': distill_loss
-            })
-            if return_attn and attn_weights is not None:
-                results['attn_weights'] = attn_weights
-                
-        elif mode == 'infer':
-            z_student = self.student(coords)
-            recon_student = self.decoder(z_student)
-            
-            results.update({
-                'z_student': z_student,
-                'recon_student': recon_student
-            })
+        z_student = self.student(coords)
+        recon_student = self.decoder(z_student)
         
+        if self.projection_head is not None:    # if not distill use contrastive alignment
+            z_teacher_proj = F.normalize(self.projection_head(z_teacher), dim=-1)
+            z_student_proj = F.normalize(self.projection_head(z_student), dim=-1)
+            distill_loss = 1 - F.cosine_similarity(z_teacher_proj, z_student_proj).mean()
+        else:
+            distill_loss = F.mse_loss(z_student, z_teacher.detach())
+        
+        results.update({
+            'z_teacher': z_teacher,
+            'z_student': z_student,
+            'recon_teacher': recon_teacher,
+            'recon_student': recon_student,
+            'distill_loss': distill_loss
+        })
+        if return_attn and attn_weights is not None:
+            results['attn_weights'] = attn_weights
+
         return results
-
-    def compute_losses(self, pred_dict, gene_expr, recon_weight):
-        losses = {}
-        if 'recon_teacher' in pred_dict:
-            recon_loss_teacher = F.mse_loss(pred_dict['recon_teacher'], gene_expr)
-            losses['recon_teacher'] = recon_weight[0] * recon_loss_teacher
-        
-        if 'recon_student' in pred_dict:
-            recon_loss_student = F.mse_loss(pred_dict['recon_student'], gene_expr)
-            losses['recon_student'] = recon_weight[1] * recon_loss_student
-            
-        if 'distill_loss' in pred_dict:
-            losses['distill'] = self.lambda_distill * pred_dict['distill_loss']
-
-        total_loss = sum([losses[k] for k in losses])
-        losses['total'] = total_loss
-        
-        return losses
