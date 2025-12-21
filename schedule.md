@@ -22,3 +22,18 @@
 - 12.18
 > DLPFC experiment complete: SI, GI, DeNoise
 > Large scale data preprocess (multi-scale graph data)
+
+---
+
+- 12.22
+> Benchmark SI/GI/DN tasks
+1. STAGE/SUICA prepare data
+2. benchmark pipeline
+3. compute metrics and optimize the parameters
+
+> interpret the attention scores
+1. R/H scores
+2. trajectory
+3. visualization
+
+---

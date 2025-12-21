@@ -43,7 +43,14 @@ class CPSTrainer:
     def infer_att_scores(self, pyg_data):
         self.model.eval()
         with torch.no_grad():
-            pass
+            x = pyg_data.x.to(self.device)
+            pos = pyg_data.pos.to(self.device)
+            if not self.args.prep_scale:
+                edge_index = pyg_data.edge_index.to(self.device)
+            else:
+                edge_index = None
+            results = self.model(pos, x, edge_index, return_attn=True)
+            return results
     
     def compute_losses(self, pred_dict, gene_expr, recon_weight):
         losses = {}
@@ -57,8 +64,8 @@ class CPSTrainer:
             
         if 'distill_loss' in pred_dict:
             losses['distill'] = self.args.distill * pred_dict['distill_loss']
-
-        total_loss = torch.sum([losses[k] for k in losses])
+        print(sum([losses[k] for k in losses]).item())
+        total_loss = sum([losses[k] for k in losses])
         losses['total'] = total_loss
         
         return losses

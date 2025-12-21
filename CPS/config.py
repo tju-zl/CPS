@@ -33,6 +33,7 @@ def config():
     parser.add_argument('--distill', type=float, default=0.5)
     parser.add_argument('--num_heads', type=int, default=4)
     parser.add_argument('--sigma', type=float, default=10.0)
+    parser.add_argument('--sh_weights', default=True, action='store_true')
 
     # training control
     parser.add_argument('--lr', type=float, default=1e-3)

@@ -33,7 +33,7 @@ class StudentINR(nn.Module):
                                               sigma=fourier_sigma)
         enc_dim = self.fourier.out_dim()
         self.mlp = self._make_mlp(hidden_dims=inr_latent, act=nn.SiLU(), 
-                                  in_dim=coord_dim, out_dim=latent_dim)
+                                  in_dim=enc_dim, out_dim=latent_dim)
     
     def _make_mlp(self, hidden_dims, act, in_dim, out_dim):
         layers = []
@@ -111,7 +111,7 @@ class TeacherNicheAttention(nn.Module):
             ])
         
         self.out_proj = nn.Linear(out_dim, out_dim)
-        self.residual = nn.Linear(in_dim, out_dim) if in_dim != out_dim else nn.Identity()
+        self.residual = nn.Identity()
         self.dropout = nn.Dropout(dropout)
         self.norm = LayerNorm(out_dim)
         
@@ -121,22 +121,23 @@ class TeacherNicheAttention(nn.Module):
             multi_scale_features = self.multi_scale_convs(x, edge_index) # list[(N, D)]
             scale_features = torch.stack(multi_scale_features, dim=1) # (N, S, D)
         else:
-            scale_features = self.gene_proj(x)  # (N, S, D)
+            multi_scale_features = x
+            scale_features = self.gene_proj(multi_scale_features)  # (N, S, D)
         
         if self.share_weights:
-            query = self.query_proj(x).reshape(N, self.num_heads, self.head_dim) # (N, H, D_h)
+            query = self.query_proj(scale_features[:,0,:]).reshape(N, self.num_heads, self.head_dim) # (N, H, D_h)
             keys = self.key_proj(scale_features).reshape(N, self.num_scales, self. num_heads, self.head_dim)
             values = self.value_proj(scale_features).reshape(N, self.num_scales, self. num_heads, self.head_dim)
         else:
             queries, keys, values = [], [], []
             for i, (q_proj, k_proj, v_proj) in enumerate(zip(self.query_projs, self.key_projs, self.value_projs)):
-                q = q_proj(x).reshape(N, self.num_heads, self.head_dim)
-                k = k_proj(multi_scale_features[i]).reshape(N, self.num_heads, self.head_dim)
-                v = v_proj(multi_scale_features[i]).reshape(N, self.num_heads, self.head_dim)
-                queries.append(q.unsqueeze(1))  # (N, 1, H, D_h)
-                keys.append(k.unsqueeze(1))
-                values.append(v.unsqueeze(1))
-            query = torch.sum(torch.stack(queries, dim=1), dim=1)  # (N, H, D_h)
+                q = q_proj(scale_features[:,0,:]).reshape(N, self.num_heads, self.head_dim)
+                k = k_proj(scale_features[:,i,:]).reshape(N, self.num_heads, self.head_dim)
+                v = v_proj(scale_features[:,i,:]).reshape(N, self.num_heads, self.head_dim)
+                queries.append(q)  # i+ [(N, H, D_h)]
+                keys.append(k)
+                values.append(v)
+            query = torch.mean(torch.stack(queries, dim=1), dim=1)  # (N, H, D_h)
             keys = torch.stack(keys, dim=1)  # (N, S, H, D_h)
             values = torch.stack(values, dim=1)  # (N, S, H, D_h)
             
@@ -150,7 +151,7 @@ class TeacherNicheAttention(nn.Module):
         output = self.out_proj(attended)
         output = self.dropout(output)
         
-        residual = self.residual(x)
+        residual = self.residual(scale_features[:,0,:])
         output = self.norm(output + residual)
         
         if return_weights:
@@ -184,7 +185,7 @@ class CPSModel(nn.Module):
         self.args = args
         self.teacher = TeacherNicheAttention(in_dim=args.hvgs, out_dim=args.latent_dim,
                                            k_list=args.k_list, num_heads=args.num_heads,
-                                           dropout=args.dropout, share_weights=True,
+                                           dropout=args.dropout, share_weights=args.sh_weights,
                                            prep_scale=args.prep_scale)
         
         self.student = StudentINR(coord_dim=args.coord_dim, latent_dim=args.latent_dim,
