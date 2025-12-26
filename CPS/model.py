@@ -20,6 +20,8 @@ class FourierFeatureEncoding(nn.Module):
         return self.in_dim * self.n_freq
 
     def forward(self, coords):  # coords: [N, in_dim]
+        if self.training:
+            coords = (coords - coords.mean(dim=0)) / (coords.std(dim=0) + 1e-8)
         scaled = (2.0 * torch.pi) * (coords @ self.B.t())       # (N, n_freq)
         encoded = torch.cat([torch.cos(scaled), torch.sin(scaled)], dim=-1)
         return encoded          # (N, in_dim*n_freq)
@@ -58,7 +60,7 @@ class MultiScaleSSGConv(nn.Module):
         self.convs = nn.ModuleList([SSGConv(in_channels=in_dim, 
                                             out_channels=out_dim,
                                             K=k,
-                                            alpha=0.1, 
+                                            alpha=0., 
                                             cached=False,
                                             add_self_loops=add_self_loops) for k in k_list])
         
@@ -70,8 +72,8 @@ class MultiScaleSSGConv(nn.Module):
         feature = []
         for conv, norm in zip(self.convs, self.norms):
             h = conv(x, edge_index)
-            h = norm(h)
             h = self.activation(h)
+            h = norm(h)
             h = self.dropout(h)
             feature.append(h)
         return feature
@@ -115,6 +117,8 @@ class TeacherNicheAttention(nn.Module):
         self.dropout = nn.Dropout(dropout)
         self.norm = LayerNorm(out_dim)
         
+        self.temperature = nn.Parameter(torch.ones(1) * 2.3)
+        
     def forward(self, x, edge_index=None, return_weights=True):
         N = x.shape[0]
         if not self.prep_scale:
@@ -140,19 +144,22 @@ class TeacherNicheAttention(nn.Module):
             query = torch.mean(torch.stack(queries, dim=1), dim=1)  # (N, H, D_h)
             keys = torch.stack(keys, dim=1)  # (N, S, H, D_h)
             values = torch.stack(values, dim=1)  # (N, S, H, D_h)
-            
-        attn_scores = torch.einsum('nhd,nshd->nsh', query, keys) / (self.head_dim ** 0.5)
+        
+        scale = torch.exp(self.temperature) / (self.head_dim ** 0.5)
+        attn_scores = torch.einsum('nhd,nshd->nsh', query, keys) / (self.head_dim ** 0.5) * scale
         attn_weights = F.softmax(attn_scores, dim=1)  # (N, S, H)
         attn_weights = self.dropout(attn_weights)
         
         attended = torch.einsum('nsh,nshd->nhd', attn_weights, values)
-        attended = attended.reshape(N, -1)  # (N, l_dim)
+        output = attended.reshape(N, -1)  # (N, l_dim)
         
-        output = self.out_proj(attended)
         output = self.dropout(output)
         
+        output = self.out_proj(output)
         residual = self.residual(scale_features[:,0,:])
         output = self.norm(output + residual)
+        
+        
         
         if return_weights:
             return output, attn_weights
@@ -202,7 +209,7 @@ class CPSModel(nn.Module):
         
     def forward(self, coords, x=None, edge_index=None, return_attn=False):
         results = {}
-        z_teacher, attn_weights = self.teacher(x, edge_index)
+        z_teacher, attn_weights = self.teacher(x, edge_index, return_attn)
         recon_teacher = self.decoder(z_teacher)
 
         z_student = self.student(coords)
@@ -226,3 +233,9 @@ class CPSModel(nn.Module):
             results['attn_weights'] = attn_weights
 
         return results
+
+    def generate(self, coords):
+        pass
+    
+    def interpret(self, x, edge_index=None, return_attn=True):
+        pass

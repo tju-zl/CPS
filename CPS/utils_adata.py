@@ -58,5 +58,10 @@ class BatchCollater:
         
 # mask for cell and genes
 class DataPerturb:
-    def __init__(self):
+    def __init__(self, adata, method='spatial_imputation'):
+        self.adata = adata.copy()
+        self.method = method
+        
+    def mask_spots(self, down_ratio=0.5):
         pass
+        

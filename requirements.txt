@@ -17,4 +17,4 @@ torchdata==0.7.0
 transformers==4.46.3
 umap-learn==0.5.7
 UpSetPlot==0.9.0
-
+gseapy==1.0.4

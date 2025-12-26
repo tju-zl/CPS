@@ -1,5 +1,33 @@
 import numpy as np
+import pandas as pd
 import scanpy as sc
+import seaborn as sns
+import matplotlib.pyplot as plt
+from scipy.spatial.distance import cdist
+from scipy.stats import spearmanr, ttest_ind, f_oneway
+from sklearn.cluster import KMeans
+from sklearn.metrics import silhouette_score
+from sklearn.manifold import TSNE
+
+plt.style.use('seaborn-v0_8-whitegrid')
+sns.set_palette("husl")
+
+
+class SpatialAttentionAnalyzer:
+    def __init__(self, adata, results) -> None:
+        pass
+    
+    def run_analyze(self, output_path=None):
+        pass
+    
+    def print_basic_states(self):
+        pass
+    
+    def plot_spatial_patterns(self):
+        pass
+    
+    def plot_RH_patterns(self):
+        pass
 
 
 # plot scale attention
@@ -33,18 +61,3 @@ def plot_attention_trajectory(results, spatial_coords, n_intervals=10):
     pass
 
 
-class SpatialAttentionAnalyzer:
-    def __init__(self, adata, results) -> None:
-        pass
-    
-    def run_analyze(self, output_path=None):
-        pass
-    
-    def print_basic_states(self):
-        pass
-    
-    def plot_spatial_patterns(self):
-        pass
-    
-    def plot_RH_patterns(self):
-        pass

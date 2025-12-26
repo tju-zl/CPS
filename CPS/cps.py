@@ -1,6 +1,9 @@
 import torch
 import torch.nn.functional as F
 import tqdm.notebook as tq
+import matplotlib.pyplot as plt
+import seaborn as sns
+import numpy as np
 from .model import CPSModel
 
 
@@ -34,23 +37,44 @@ class CPSTrainer:
             self.optimizer.step()
         
     # infer the spots
-    def infer_spots(self, coords):
+    def infer_imputation_spots(self, coords):
         self.model.eval()
         with torch.no_grad():
             pass
+        
+    def infer_imputation_genes(self, pyg_data):
+        pass
     
     # infer the atten scores
-    def infer_att_scores(self, pyg_data):
+    def interpret_attn_scores(self, pyg_data):
         self.model.eval()
         with torch.no_grad():
             x = pyg_data.x.to(self.device)
-            pos = pyg_data.pos.to(self.device)
+            pos = pyg_data.pos
             if not self.args.prep_scale:
                 edge_index = pyg_data.edge_index.to(self.device)
             else:
                 edge_index = None
-            results = self.model(pos, x, edge_index, return_attn=True)
-            return results
+            z_teacher, attn_weights = self.model.teacher(x, edge_index, return_weights=True)
+            attn_avg_heads = attn_weights.mean(dim=-1).cpu().numpy()
+            n_scales = len(self.args.k_list)
+            fig, axes = plt.subplots(1, n_scales, figsize=(5 * n_scales, 5))
+            if n_scales == 1: axes = [axes]
+    
+            for i, k in enumerate(self.args.k_list):
+                ax = axes[i]
+                sc = ax.scatter(pos[:, 0], pos[:, 1], 
+                                c=attn_avg_heads[:, i], 
+                                cmap='viridis', s=10, alpha=0.8)
+                ax.set_title(f"Attention to Scale K={k}")
+                ax.axis('off')
+                plt.colorbar(sc, ax=ax, fraction=0.046, pad=0.04)
+                
+            plt.suptitle("Spatial Attention", fontsize=16)
+            plt.tight_layout()
+            
+            return z_teacher.to('cpu').detach().numpy(), attn_weights.to('cpu').detach().numpy()
+            
     
     def compute_losses(self, pred_dict, gene_expr, recon_weight):
         losses = {}

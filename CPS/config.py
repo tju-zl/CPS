@@ -26,18 +26,18 @@ def config():
     parser.add_argument('--decoder', type=str, default='MLP', help='ZINB, NB or MLP')
     parser.add_argument('--latent_dim', type=int, default=64, help='dim of latent')
     parser.add_argument('--dropout', type=float, default=0.2)
-    parser.add_argument('--k_list', type=list, default=[0,1,2,3,4,5,6,7])
+    parser.add_argument('--k_list', type=list, default=[0,1,2,3,4,5,6,7])# [0,1,2,3,4,5,6,7]
     parser.add_argument('--inr_latent', type=list, default=[256,256,256])
     parser.add_argument('--decoder_latent', type=list, default=[256,512])
     parser.add_argument('--freq', type=int, default=32, help='dim of position encoding')
     parser.add_argument('--distill', type=float, default=0.5)
-    parser.add_argument('--num_heads', type=int, default=4)
+    parser.add_argument('--num_heads', type=int, default=8)
     parser.add_argument('--sigma', type=float, default=10.0)
     parser.add_argument('--sh_weights', default=True, action='store_true')
 
     # training control
     parser.add_argument('--lr', type=float, default=1e-3)
-    parser.add_argument('--max_epoch', type=int, default=1000)
+    parser.add_argument('--max_epoch', type=int, default=200)
     parser.add_argument('--batch_size', type=int, default=256)
     parser.add_argument('--weight_decay', type=float, default=1e-4)
 
