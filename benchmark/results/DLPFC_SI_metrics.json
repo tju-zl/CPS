@@ -1,0 +1,21 @@
+{
+  "mse": 4.076969146728516,
+  "rmse": 2.019150495529175,
+  "mae": 0.6888174414634705,
+  "r2": 0.7175211264798556,
+  "pearson_global": 0.8480898307394822,
+  "spearman_global": 0.5189309177186842,
+  "cosine_similarity": 0.8502694964408875,
+  "cosine_similarity_mask": 0.8798320339441256,
+  "sam": 30.482664108276367,
+  "sam_mask": 28.37789158418716,
+  "iou_zero": 0.0004147785770963532,
+  "support_recovery": 0.1598849185735525,
+  "mse_mask": 21.563913345336914,
+  "mae_mask": 2.834043264389038,
+  "n_samples": 726000,
+  "pearson_per_sample": 0.8392111613376163,
+  "spearman_per_sample": 0.51756531342103,
+  "pearson_per_sample_mask": 0.8115409942902342,
+  "spearman_per_sample_mask": 0.6541638753883947
+}
