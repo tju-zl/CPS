@@ -32,7 +32,7 @@ def config():
     parser.add_argument('--freq', type=int, default=8, help='dim of position encoding')
     parser.add_argument('--distill', type=float, default=1.0)
     parser.add_argument('--num_heads', type=int, default=4)
-    parser.add_argument('--sigma', type=float, default=3.0)
+    parser.add_argument('--sigma', type=float, default=1.0)
     parser.add_argument('--sh_weights', default=True, action='store_true')
 
     # training control
