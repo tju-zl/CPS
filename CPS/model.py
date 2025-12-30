@@ -7,7 +7,7 @@ from .module import *
 
 
 class FourierFeatureEncoding(nn.Module):
-    def __init__(self, in_dim=2, num_frequencies=32, sigma=1.0):
+    def __init__(self, in_dim=2, num_frequencies=8, sigma=1.0):
         super().__init__()
         self.in_dim = in_dim
         self.n_freq = num_frequencies
@@ -20,10 +20,7 @@ class FourierFeatureEncoding(nn.Module):
         return self.in_dim * self.n_freq
 
     def forward(self, coords):  # coords: [N, in_dim]
-        # if self.training:
-        # coords = (coords - coords.mean(dim=0)) / (coords.std(dim=0) + 1e-8)
-        coords = coords - coords.min(0).values
-        coords = coords / coords.max(0).values * 2 - 1
+        
         scaled = (2.0 * torch.pi) * (coords @ self.B.t())       # (N, n_freq)
         encoded = torch.cat([torch.cos(scaled), torch.sin(scaled)], dim=-1)
         return encoded          # (N, in_dim*n_freq)
@@ -412,10 +409,7 @@ class CPSModel(nn.Module):
                                              nn.Linear(args.latent_dim, args.latent_dim) 
         ) if args.distill == 0 else None
         
-        self.proj = nn.Sequential(nn.Linear(args.latent_dim, args.latent_dim),
-                                             nn.ReLU(),
-                                             nn.Linear(args.latent_dim, args.latent_dim) 
-        )
+        
         
     def forward(self, coords, x=None, edge_index=None, return_attn=False, return_zinb_params=False):
         results = {}
@@ -450,7 +444,7 @@ class CPSModel(nn.Module):
         if self.projection_head is not None:    # if not distill use contrastive alignment
             z_teacher_proj = F.normalize(self.projection_head(z_teacher), dim=-1)
             z_student_proj = F.normalize(self.projection_head(z_student), dim=-1)
-            distill_loss = 1 - F.cosine_similarity(z_teacher_proj, z_student_proj).mean()
+            distill_loss = 1 - F.cosine_similarity(z_teacher_proj.detach(), z_student_proj).mean()
         else:
             distill_loss = F.mse_loss(z_student, z_teacher.detach())
         

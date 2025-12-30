@@ -29,10 +29,10 @@ def config():
     parser.add_argument('--k_list', nargs='+', type=int, default=[0,1,2,3,4,5,6,7])
     parser.add_argument('--inr_latent', nargs='+', type=int, default=[256,256,256])
     parser.add_argument('--decoder_latent', nargs='+', type=int, default=[256,512])
-    parser.add_argument('--freq', type=int, default=32, help='dim of position encoding')
+    parser.add_argument('--freq', type=int, default=8, help='dim of position encoding')
     parser.add_argument('--distill', type=float, default=1.0)
     parser.add_argument('--num_heads', type=int, default=4)
-    parser.add_argument('--sigma', type=float, default=1.0)
+    parser.add_argument('--sigma', type=float, default=3.0)
     parser.add_argument('--sh_weights', default=True, action='store_true')
 
     # training control

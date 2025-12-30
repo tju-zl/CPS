@@ -17,6 +17,8 @@ class CPSTrainer:
         self.model = CPSModel(args).to(self.device)
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=args.lr, 
                                           weight_decay=args.weight_decay)
+        self.optimizer_inr = torch.optim.Adam(self.model.student.parameters(), lr=args.lr, 
+                                          weight_decay=args.weight_decay)
         
     # train the model
     def fit(self, pyg_data, val_data=None, patience=20, verbose=True, print_every=10):
@@ -63,11 +65,13 @@ class CPSTrainer:
         for epoch in tq.tqdm(range(self.args.max_epoch)):
             self.model.train()
             self.optimizer.zero_grad()
+            self.optimizer_inr.zero_grad()
             results = self.model(pos, x, edge_index, return_attn=False)
             losses = self.compute_losses(results, y, recon_weight=[0.5, 0.5], verbose=False)
             losses['total'].backward()
             torch.nn.utils.clip_grad_norm_(self.model.parameters(), 5)
             self.optimizer.step()
+            self.optimizer_inr.zero_grad()
             
             # 记录训练损失
             train_total_loss = losses['total'].item()
