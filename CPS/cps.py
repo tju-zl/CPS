@@ -4,7 +4,7 @@ import tqdm.notebook as tq
 import matplotlib.pyplot as plt
 import seaborn as sns
 import numpy as np
-from .model import CPSModel
+from .model import CPSModel, ZINBLoss
 
 
 class CPSTrainer:
@@ -17,18 +17,16 @@ class CPSTrainer:
         self.model = CPSModel(args).to(self.device)
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=args.lr, 
                                           weight_decay=args.weight_decay)
-        self.optimizer_inr = torch.optim.Adam(self.model.student.parameters(), lr=args.lr, 
-                                          weight_decay=args.weight_decay)
+        # self.optimizer_inr = torch.optim.Adam(self.model.student.parameters(), lr=args.lr, 
+        #                                   weight_decay=args.weight_decay)
         
     # train the model
-    def fit(self, pyg_data, val_data=None, patience=20, verbose=True, print_every=10):
+    def fit(self, pyg_data, verbose=True, print_every=10):
         """
         Train CPS model
         
         Parameters:
             pyg_data: Data object, training data
-            val_data: Data object, optional, validation data
-            patience: int, early stopping patience value
             verbose: bool, whether to print training information
             print_every: int, print loss information every N epochs
         """
@@ -41,37 +39,24 @@ class CPSTrainer:
         else:
             edge_index = None
         
-        # Initialize learning rate scheduler
-        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-            self.optimizer, mode='min', factor=0.5, patience=10, verbose=verbose
-        )
-        
-        # Early stopping mechanism
-        best_val_loss = float('inf')
-        patience_counter = 0
-        
         # Loss history recording
         loss_history = {
             'train_total': [],
             'train_recon_teacher': [],
             'train_recon_student': [],
             'train_distill': [],
-            'val_total': [],
-            'val_recon_teacher': [],
-            'val_recon_student': [],
-            'val_distill': []
         }
         
         for epoch in tq.tqdm(range(self.args.max_epoch)):
             self.model.train()
             self.optimizer.zero_grad()
-            self.optimizer_inr.zero_grad()
+            # self.optimizer_inr.zero_grad()
             results = self.model(pos, x, edge_index, return_attn=False)
             losses = self.compute_losses(results, y, recon_weight=[0.5, 0.5], verbose=False)
             losses['total'].backward()
-            torch.nn.utils.clip_grad_norm_(self.model.parameters(), 5)
+            torch.nn.utils.clip_grad_norm_(self.model.parameters(), 10)
             self.optimizer.step()
-            self.optimizer_inr.zero_grad()
+            # self.optimizer_inr.zero_grad()
             
             # Record training loss
             train_total_loss = losses['total'].item()
@@ -85,117 +70,23 @@ class CPSTrainer:
             if 'distill' in losses:
                 loss_history['train_distill'].append(losses['distill'].item())
             
-            # Validation
-            if val_data is not None:
-                val_losses = self.validate(val_data, return_all_losses=True)
-                val_total_loss = val_losses['total']
-                loss_history['val_total'].append(val_total_loss)
+            # Print training information (no validation)
+            if verbose and (epoch % print_every == 0 or epoch == self.args.max_epoch - 1):
+                # Build compact print format
+                print(f"\nEpoch {epoch:3d}: ", end="")
                 
-                # Record each component of validation loss
-                if 'recon_teacher' in val_losses:
-                    loss_history['val_recon_teacher'].append(val_losses['recon_teacher'])
-                if 'recon_student' in val_losses:
-                    loss_history['val_recon_student'].append(val_losses['recon_student'])
-                if 'distill' in val_losses:
-                    loss_history['val_distill'].append(val_losses['distill'])
+                # Training loss
+                train_str = f"Train[Total:{train_total_loss:.4f}"
+                if 'recon_teacher' in losses:
+                    train_str += f", T:{losses['recon_teacher'].item():.4f}"
+                if 'recon_student' in losses:
+                    train_str += f", S:{losses['recon_student'].item():.4f}"
+                if 'distill' in losses:
+                    train_str += f", D:{losses['distill'].item():.4f}"
+                train_str += "]"
                 
-                # Learning rate scheduling
-                scheduler.step(val_total_loss)
-                
-                # Early stopping check
-                if val_total_loss < best_val_loss:
-                    best_val_loss = val_total_loss
-                    patience_counter = 0
-                    # Save best model
-                    self.best_model_state = self.model.state_dict().copy()
-                else:
-                    patience_counter += 1
-                    if patience_counter >= patience:
-                        if verbose:
-                            print(f"Early stopping at epoch {epoch}")
-                        break
-                
-                # Print training information
-                if verbose and (epoch % print_every == 0 or epoch == self.args.max_epoch - 1):
-                    # Build compact print format
-                    print(f"\nEpoch {epoch:3d}: ", end="")
-                    
-                    # Training loss
-                    train_str = f"Train[Total:{train_total_loss:.4f}"
-                    if 'recon_teacher' in losses:
-                        train_str += f", T:{losses['recon_teacher'].item():.4f}"
-                    if 'recon_student' in losses:
-                        train_str += f", S:{losses['recon_student'].item():.4f}"
-                    if 'distill' in losses:
-                        train_str += f", D:{losses['distill'].item():.4f}"
-                    train_str += "]"
-                    
-                    # Validation loss
-                    val_str = f"Val[Total:{val_total_loss:.4f}"
-                    if 'recon_teacher' in val_losses:
-                        val_str += f", T:{val_losses['recon_teacher']:.4f}"
-                    if 'recon_student' in val_losses:
-                        val_str += f", S:{val_losses['recon_student']:.4f}"
-                    if 'distill' in val_losses:
-                        val_str += f", D:{val_losses['distill']:.4f}"
-                    val_str += "]"
-                    
-                    print(f"{train_str} | {val_str}")
-            else:
-                # Print training information (no validation)
-                if verbose and (epoch % print_every == 0 or epoch == self.args.max_epoch - 1):
-                    # Build compact print format
-                    print(f"\nEpoch {epoch:3d}: ", end="")
-                    
-                    # Training loss
-                    train_str = f"Train[Total:{train_total_loss:.4f}"
-                    if 'recon_teacher' in losses:
-                        train_str += f", T:{losses['recon_teacher'].item():.4f}"
-                    if 'recon_student' in losses:
-                        train_str += f", S:{losses['recon_student'].item():.4f}"
-                    if 'distill' in losses:
-                        train_str += f", D:{losses['distill'].item():.4f}"
-                    train_str += "]"
-                    
-                    print(train_str)
+                print(train_str)
         
-        # Restore best model
-        if val_data is not None and hasattr(self, 'best_model_state'):
-            self.model.load_state_dict(self.best_model_state)
-        
-        # Return loss history
-        # return loss_history
-    
-    def validate(self, pyg_data, return_all_losses=False):
-        """
-        Validate model
-        
-        Parameters:
-            pyg_data: Data object, validation data
-            return_all_losses: bool, whether to return all loss components
-        
-        Returns:
-            If return_all_losses=True: returns loss dictionary
-            Otherwise: returns total loss value
-        """
-        self.model.eval()
-        with torch.no_grad():
-            x = pyg_data.x.to(self.device)
-            pos = pyg_data.pos.to(self.device)
-            if not self.args.prep_scale:
-                edge_index = pyg_data.edge_index.to(self.device)
-            else:
-                edge_index = None
-            
-            results = self.model(pos, x, edge_index, return_attn=False)
-            losses = self.compute_losses(results, x, recon_weight=[0.5, 0.5], verbose=False)
-            
-            if return_all_losses:
-                # Convert to scalar values
-                loss_dict = {k: v.item() for k, v in losses.items()}
-                return loss_dict
-            else:
-                return losses['total'].item()
         
     # infer the spots
     def infer_imputation_spots(self, coords):
@@ -318,6 +209,35 @@ class CPSTrainer:
                 return (z_teacher.to('cpu').detach().numpy(),
                         attn_weights.to('cpu').detach().numpy())
             
+    def compute_loss(self, pred_dict, gene_expr, recon_weight):
+        """
+        Compute various losses (supports ZINB loss and traditional loss)
+        
+        Parameters:
+            pred_dict: dict
+                Dictionary of model prediction results
+            gene_expr: torch.Tensor
+                True gene expression
+            recon_weight: list
+                Reconstruction loss weights [teacher_weight, student_weight]
+            verbose: bool
+                Whether to print loss information
+        
+        Returns:
+            losses: dict
+                Dictionary of various losses
+        """
+        losses = {}
+        
+        zinb_teacher = ZINBLoss()
+        mean_teacher = pred_dict['mean_teacher']
+        disp_teacher = pred_dict['disp_teacher']
+        pi_teacher = pred_dict['pi_teacher']
+        zinb_loss_teacher = zinb_teacher(gene_expr, mean_teacher, disp_teacher, pi_teacher)
+        losses['recon_teacher'] = recon_weight[0] * zinb_loss_teacher
+        
+        
+    
     
     def compute_losses(self, pred_dict, gene_expr, recon_weight, verbose=False):
         """
@@ -346,7 +266,6 @@ class CPSTrainer:
         if 'recon_teacher' in pred_dict:
             if use_zinb:
                 # ZINB loss
-                from .model import ZINBLoss
                 zinb_loss = ZINBLoss()
                 mean_teacher = pred_dict['mean_teacher']
                 disp_teacher = pred_dict['disp_teacher']
@@ -356,7 +275,8 @@ class CPSTrainer:
                 # Still compute MSE for monitoring
                 mse_loss_teacher = F.mse_loss(pred_dict['recon_teacher'], gene_expr)
                 # Combined loss: ZINB as main, plus small MSE for training stability
-                recon_loss_teacher = zinb_loss_teacher + 0.1 * mse_loss_teacher
+
+                recon_loss_teacher = 0.5 * zinb_loss_teacher + 0.5 * mse_loss_teacher
                 
                 losses['recon_teacher'] = recon_weight[0] * recon_loss_teacher
                 losses['recon_teacher_zinb'] = zinb_loss_teacher
@@ -379,7 +299,6 @@ class CPSTrainer:
         if 'recon_student' in pred_dict:
             if use_zinb:
                 # ZINB loss
-                from .model import ZINBLoss
                 zinb_loss = ZINBLoss()
                 mean_student = pred_dict['mean_student']
                 disp_student = pred_dict['disp_student']
@@ -389,7 +308,8 @@ class CPSTrainer:
                 # Still compute MSE for monitoring
                 mse_loss_student = F.mse_loss(pred_dict['recon_student'], gene_expr)
                 # Combined loss
-                recon_loss_student = zinb_loss_student + 0.1 * mse_loss_student
+                
+                recon_loss_student = 0.5 * zinb_loss_student + 0.5 * mse_loss_student
                 
                 losses['recon_student'] = recon_weight[1] * recon_loss_student
                 losses['recon_student_zinb'] = zinb_loss_student

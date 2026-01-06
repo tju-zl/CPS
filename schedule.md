@@ -69,6 +69,7 @@
 
 **key**: INR infers the transition using spot with composition of pure tumor or mixed cells
 
-
-12.31
----
+1.6 review code
+1. review code
+2. rethink the framework
+3. determine the model

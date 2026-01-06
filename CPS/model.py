@@ -172,62 +172,114 @@ class TeacherNicheAttention(nn.Module):
 
 
 import torch.distributions as dist
-
 class ZINBLoss(nn.Module):
-    """
-    Zero-Inflated Negative Binomial 损失函数
-    专门用于基因表达数据（计数数据 + 零膨胀）
-    """
-    def __init__(self, eps=1e-10):
+    def __init__(self, eps=1e-8):
         super().__init__()
         self.eps = eps
         
-    def forward(self, x, mean, disp, pi, eps=1e-10):
-        """
-        计算ZINB负对数似然
+    def forward(self, x, mean, disp, pi, eps=1e-8):
+        # 确保x是整数
+        if x.is_floating_point():
+            x = x.round()
+        x = x.to(torch.long)
         
-        参数:
-            x: 观测值 (batch_size, n_genes)
-            mean: 负二项分布的均值 (batch_size, n_genes)
-            disp: 离散度参数 (batch_size, n_genes) 或标量
-            pi: 零膨胀概率 (batch_size, n_genes)
-            
-        返回:
-            loss: 负对数似然
-        """
-        # 确保参数为正数
-        mean = mean + eps
-        disp = disp + eps
-        pi = torch.clamp(pi, eps, 1-eps)
+        # 数值稳定性
+        mean = torch.clamp(mean, min=eps)
+        disp = torch.clamp(disp, min=eps)
+        pi = torch.clamp(pi, min=eps, max=1-eps)
         
-        # 负二项分布
+        # 使用logits避免probs的数值问题
+        logits = torch.log(disp) - torch.log(mean)
+        
+        # 创建负二项分布
         nb = dist.NegativeBinomial(
             total_count=1/disp,
-            probs=disp/(mean + disp)
+            logits=logits
         )
         
-        # 零膨胀负二项分布的对数似然
-        # log likelihood = log(pi * I(x=0) + (1-pi) * NB(x|mean,disp))
-        
-        # 计算负二项分布的对数概率
+        # 计算对数概率
         nb_log_prob = nb.log_prob(x)
         
-        # 零膨胀部分
-        if torch.any(x == 0):
-            # 对于x=0的情况，考虑零膨胀
-            zero_mask = (x == 0).float()
-            # 零膨胀混合分布的对数似然
-            log_likelihood = torch.log(
-                pi * zero_mask + (1 - pi) * torch.exp(nb_log_prob) + eps
-            )
-        else:
-            # 没有零值，直接使用负二项分布
-            log_likelihood = torch.log(1 - pi + eps) + nb_log_prob
+        # 计算零膨胀对数似然
+        zero_mask = (x == 0)
         
-        # 负对数似然
-        nll = -log_likelihood.mean()
+        # 使用log-sum-exp技巧提高数值稳定性
+        # 对于x=0: log(pi + (1-pi)*exp(nb_log_prob))
+        # 对于x>0: log(1-pi) + nb_log_prob
         
-        return nll
+        # 计算log(pi)和log(1-pi)
+        log_pi = torch.log(pi + eps)
+        log_one_minus_pi = torch.log(1 - pi + eps)
+        
+        # 使用torch.where
+        log_likelihood = torch.where(
+            zero_mask,
+            # x=0: log(pi + (1-pi)*exp(nb_log_prob))
+            # 使用logsumexp: log(exp(log_pi) + exp(log_one_minus_pi + nb_log_prob))
+            torch.logsumexp(
+                torch.stack([log_pi, log_one_minus_pi + nb_log_prob], dim=-1),
+                dim=-1
+            ),
+            # x>0: log(1-pi) + nb_log_prob
+            log_one_minus_pi + nb_log_prob
+        )
+        
+        return -log_likelihood.mean()
+# class ZINBLoss(nn.Module):
+#     """
+#     Zero-Inflated Negative Binomial 损失函数
+#     专门用于基因表达数据（计数数据 + 零膨胀）
+#     """
+#     def __init__(self, eps=1e-10):
+#         super().__init__()
+#         self.eps = eps
+        
+#     def forward(self, x, mean, disp, pi, eps=1e-10):
+#         """
+#         计算ZINB负对数似然
+        
+#         参数:
+#             x: 观测值 (batch_size, n_genes)
+#             mean: 负二项分布的均值 (batch_size, n_genes)
+#             disp: 离散度参数 (batch_size, n_genes) 或标量
+#             pi: 零膨胀概率 (batch_size, n_genes)
+            
+#         返回:
+#             loss: 负对数似然
+#         """
+#         # 确保参数为正数
+#         mean = mean + eps
+#         disp = disp + eps
+#         pi = torch.clamp(pi, eps, 1-eps)
+        
+#         # 负二项分布
+#         nb = dist.NegativeBinomial(
+#             total_count=1/disp,
+#             probs=disp/(mean + disp)
+#         )
+        
+#         # 零膨胀负二项分布的对数似然
+#         # log likelihood = log(pi * I(x=0) + (1-pi) * NB(x|mean,disp))
+        
+#         # 计算负二项分布的对数概率
+#         nb_log_prob = nb.log_prob(x)
+        
+#         # 零膨胀部分
+#         if torch.any(x == 0):
+#             # 对于x=0的情况，考虑零膨胀
+#             zero_mask = (x == 0).float()
+#             # 零膨胀混合分布的对数似然
+#             log_likelihood = torch.log(
+#                 pi * zero_mask + (1 - pi) * torch.exp(nb_log_prob) + eps
+#             )
+#         else:
+#             # 没有零值，直接使用负二项分布
+#             log_likelihood = torch.log(1 - pi + eps) + nb_log_prob
+        
+#         # 负对数似然
+#         nll = -log_likelihood.mean()
+        
+#         return nll
 
 
 class ResidualBlock(nn.Module):
@@ -411,7 +463,7 @@ class CPSModel(nn.Module):
         
         
         
-    def forward(self, coords, x=None, edge_index=None, return_attn=False, return_zinb_params=False):
+    def forward(self, coords, x=None, edge_index=None, return_attn=False, return_zinb_params=True):
         results = {}
         z_teacher, attn_weights = self.teacher(x, edge_index, return_attn)
         
