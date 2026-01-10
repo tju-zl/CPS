@@ -340,7 +340,7 @@ def compute_genes_imputation_metrics(original_data, imputed_data, mask_pattern, 
         return compute_simple_metrics(original, imputed, mask_pattern)
 
 
-def print_metrics(metrics, title="填补指标", comprehensive=False):
+def print_metrics(metrics, title="填补指标", comprehensive=True):
     """
     打印指标
     

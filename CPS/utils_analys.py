@@ -158,22 +158,18 @@ def compute_imputation_metrics(original_data, imputed_data, test_indices=None,
         # 测试spots的MSE（存储为通用键）
         test_mse = mean_squared_error(original_test.flatten(), imputed_test.flatten())
         metrics['mse'] = float(test_mse)
-        metrics['test_spots_mse'] = float(test_mse)  # 同时保留旧键名以保持兼容性
         
         # 测试spots的RMSE
         test_rmse = np.sqrt(test_mse)
         metrics['rmse'] = float(test_rmse)
-        metrics['test_spots_rmse'] = float(test_rmse)
         
         # 测试spots的MAE
         test_mae = mean_absolute_error(original_test.flatten(), imputed_test.flatten())
         metrics['mae'] = float(test_mae)
-        metrics['test_spots_mae'] = float(test_mae)
         
         # 测试spots的R²
         test_r2 = r2_score(original_test.flatten(), imputed_test.flatten())
         metrics['r2_score'] = float(test_r2)
-        metrics['test_spots_r2'] = float(test_r2)
         
         # 每个测试spot的误差统计
         spot_errors = np.mean((original_test - imputed_test) ** 2, axis=1)

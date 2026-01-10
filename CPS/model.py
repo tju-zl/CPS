@@ -6,7 +6,7 @@ import numpy as np
 from .module import *
 
 
-class FourierFeatureEncoding(nn.Module):
+class FourierPositionMapping(nn.Module):
     def __init__(self, in_dim=2, num_frequencies=8, sigma=1.0):
         super().__init__()
         self.in_dim = in_dim
@@ -32,7 +32,7 @@ class FourierFeatureEncoding(nn.Module):
 class StudentINR(nn.Module):
     def __init__(self, coord_dim, latent_dim, num_freq, fourier_sigma, inr_latent):
         super().__init__()
-        self.fourier = FourierFeatureEncoding(in_dim=coord_dim, num_frequencies=num_freq, sigma=fourier_sigma)
+        self.fourier = FourierPositionMapping(in_dim=coord_dim, num_frequencies=num_freq, sigma=fourier_sigma)
         enc_dim = self.fourier.out_dim()
         self.mlp = self._make_mlp(hidden_dims=inr_latent, act=nn.SiLU(), 
                                   in_dim=enc_dim, out_dim=latent_dim)
@@ -53,7 +53,7 @@ class StudentINR(nn.Module):
 
 
 # ! consider large scale dataset
-class MultiScaleSSGConv(nn.Module):
+class MultiHopSSGConv(nn.Module):
     def __init__(self, in_dim, out_dim, k_list, dropout, add_self_loops=True):
         super().__init__()
         self.k_list = k_list
@@ -80,6 +80,7 @@ class MultiScaleSSGConv(nn.Module):
         return feature
     
 
+# TeacherNetwork
 class TeacherNicheAttention(nn.Module):
     def __init__(self, in_dim, out_dim, k_list, num_heads, dropout, share_weights=False, prep_scale=False):
         super().__init__()
@@ -93,7 +94,7 @@ class TeacherNicheAttention(nn.Module):
         self.prep_scale = prep_scale
         
         if not prep_scale:
-            self.multi_scale_convs = MultiScaleSSGConv(
+            self.multi_scale_convs = MultiHopSSGConv(
                 in_dim, out_dim, k_list, dropout)
         else:
             self.gene_proj = nn.Linear(in_dim, out_dim)
@@ -456,10 +457,10 @@ class CPSModel(nn.Module):
         self.decoder = SharedDecoder(in_dim=args.latent_dim, out_dim=args.hvgs,
                                      hid_dims=args.decoder_latent, dropout=args.dropout)
         
-        self.projection_head = nn.Sequential(nn.Linear(args.latent_dim, args.latent_dim),
-                                             nn.ReLU(),
-                                             nn.Linear(args.latent_dim, args.latent_dim) 
-        ) if args.distill == 0 else None
+        # self.projection_head = nn.Sequential(nn.Linear(args.latent_dim, args.latent_dim),
+        #                                      nn.ReLU(),
+        #                                      nn.Linear(args.latent_dim, args.latent_dim) 
+        # ) if args.distill == 0 else None
         
         
         
@@ -511,9 +512,3 @@ class CPSModel(nn.Module):
             results['attn_weights'] = attn_weights
 
         return results
-
-    def generate(self, coords):
-        pass
-    
-    def interpret(self, x, edge_index=None, return_attn=True):
-        pass
