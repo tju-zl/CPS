@@ -1,0 +1,22 @@
+{
+  "data_type": "Log1p Transformed",
+  "mse_global": 0.05931541323661804,
+  "rmse_global": 0.24354755878448486,
+  "mae_global": 0.13020077347755432,
+  "r2_global": 0.589718175713537,
+  "pearson_global": 0.7724309131779734,
+  "spearman_global": 0.4756455651445963,
+  "mse_sample": 0.05931542068719864,
+  "mae_sample": 0.13020072877407074,
+  "pearson_sample": 0.735653143574965,
+  "spearman_sample": 0.4618120330230563,
+  "cosine_sample": 0.7656603455543518,
+  "sam_sample": 39.65698821336932,
+  "mse_nonzero_sample": 0.2859703600406647,
+  "mae_nonzero_sample": 0.4630393981933594,
+  "pearson_nonzero_sample": 0.7139030728321645,
+  "spearman_nonzero_sample": 0.6087592809207087,
+  "cosine_nonzero_sample": 0.867820143699646,
+  "sam_nonzero_sample": 29.492031037022045,
+  "n_sample": 3460.0
+}
