@@ -9,22 +9,6 @@ from scipy.stats import pearsonr, spearmanr
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 
 
-def compute_attention_score(results):
-    spot_attn = results['attn_weights'].mean(dim=2)
-    
-    scale_attention_stats = {
-    'mean': results['attn_weights'].mean(dim=0),  # 每个尺度的平均关注度
-    'std': results['attn_weights'].std(dim=0),    # 关注度的变异程度
-    'max': results['attn_weights'].max(dim=0).values,  # 最大关注度
-    'min': results['attn_weights'].min(dim=0).values,  # 最小关注度
-    }
-    
-    return {
-        'spot_attention': spot_attn,
-        'scale_stats': scale_attention_stats
-    }
-
-
 def mclust(adata, arg, refine=False, key='z', pca_dim=32):
     from sklearn.decomposition import PCA
     pca = PCA(n_components=pca_dim, random_state=arg.seed)
@@ -73,3 +57,28 @@ def refine_label(adata, radius=0, key='label'):
     return new_type
 
 
+def calc_morans_i(adata_input, genes=None):
+
+    if 'neighbors' not in adata_input.uns:
+        sc.pp.neighbors(adata_input, use_rep='spatial', n_neighbors=15)
+
+    if genes is None:
+        genes = adata_input.var_names
+
+    m_i = sc.metrics.morans_i(adata_input, vals=adata_input[:, genes].X.T)
+    
+    return m_i
+
+def calc_cnr(adata, gene_name, roi_mask, bg_mask):
+
+    expr = adata[:, gene_name].X.toarray().flatten()
+
+    signal_roi = expr[roi_mask]
+    signal_bg = expr[bg_mask]
+
+    mu_roi, std_roi = np.mean(signal_roi), np.std(signal_roi)
+    mu_bg, std_bg = np.mean(signal_bg), np.std(signal_bg)
+
+    cnr = np.abs(mu_roi - mu_bg) / np.sqrt(std_roi**2 + std_bg**2)
+    
+    return cnr, mu_roi, std_roi, mu_bg, std_bg

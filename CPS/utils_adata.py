@@ -7,6 +7,7 @@ from torch.utils.data import Dataset
 from collections import namedtuple
 import scipy.sparse
 from scipy.spatial import cKDTree
+import scanpy as sc
 
 
 BatchData = namedtuple('BatchData', ['x', 'y', 'pos'])
@@ -259,84 +260,131 @@ class SpatialGraphBuilder:
         return data
 
 
-
-
 def generate_sr_coords(adata, upscale_factor=4, margin=0):
     """
-    根据现有 adata 的坐标范围，生成更高分辨率的网格坐标。
-    并且通过距离过滤，只保留组织覆盖区域内的点（去除背景）。
+    Based on the coordinate range of the existing data, a higher-resolution grid of coordinates is generated.
+    Furthermore, distance filtering is applied to retain only the points within the tissue-covered area (removing the background).
     
     Args:
-        adata: 原始 AnnData 对象，包含 .obsm['spatial']
-        upscale_factor: 放大倍数 (例如 2 表示宽高各 x2，总点数 x4)
-        margin: 允许向外延伸的距离 (通常设为 0 或很小的值)
+        adata: raw AnnData, include.obsm['spatial']
+        upscale_factor: 2x2
+        margin: 0 or smale value
         
     Returns:
-        new_coords (np.array): (N_new, 2) 新的高清坐标矩阵
+        new_coords (np.array): (N_new, 2) 
     """
-    # 1. 获取原始坐标和范围
     coords = adata.obsm['spatial']
     min_x, min_y = coords.min(axis=0)
     max_x, max_y = coords.max(axis=0)
     
-    # 2. 计算原始的分辨率 (大致的 Spot 间距)
-    # 通过计算最近邻距离的平均值来估算
     tree = cKDTree(coords)
-    dists, _ = tree.query(coords, k=2) # k=2 因为第1个是自己
-    avg_step = np.mean(dists[:, 1]) # 原始的步长
-    
-    # 3. 生成新的高分辨率网格
+    dists, _ = tree.query(coords, k=2) 
+    avg_step = np.mean(dists[:, 1])
+
     new_step = avg_step / upscale_factor
     
-    # 使用 meshgrid 生成网格
     x_range = np.arange(min_x - margin, max_x + margin, new_step)
     y_range = np.arange(min_y - margin, max_y + margin, new_step)
     grid_x, grid_y = np.meshgrid(x_range, y_range)
     
-    # 拉平为 (N, 2)
     grid_coords = np.vstack([grid_x.ravel(), grid_y.ravel()]).T
     
-    print(f"原始点数: {len(coords)}")
-    print(f"生成的全网格点数: {len(grid_coords)}")
+    print(f"num of raw spots: {len(coords)}")
+    print(f"num of generation spots: {len(grid_coords)}")
     
-    # 4. 关键步骤：背景过滤 (Masking Background)
-    # 我们只保留那些“离原始数据点比较近”的网格点
-    # 阈值通常设为原始步长的 0.6-0.8 倍，保证空隙被填满，但外部背景被切除
     dist_threshold = avg_step * 0.8 
-    
-    # 查询每个网格点离它最近的原始点的距离
+
     dists_to_real, _ = tree.query(grid_coords, k=1)
-    
-    # 只保留距离小于阈值的点
+  
     mask = dists_to_real < dist_threshold
     final_coords = grid_coords[mask]
     
-    print(f"过滤背景后的 SR 点数: {len(final_coords)}")
+    print(f"filter bg SR num: {len(final_coords)}")
+    
+    return final_coords
+
+
+# Visium HD 2um (subcellular) -> 16um (cellular) 
+# lr_coords = generate_lr_coords(adata, downscale_factor=8)
+
+def generate_lr_coords(adata, downscale_factor=4, margin=0):
+    """
+    Visium HD Binning
+    Args:
+        adata: AnnData (Visium HD raw data),  .obsm['spatial']
+        downscale_factor: 
+                        Visium HD raw 2um
+                        4 -> 8um 
+                        8 -> 16um 
+        margin: 0
+        
+    Returns:
+        final_coords (np.array): (N_new, 2) 
+    """
+    coords = adata.obsm['spatial']
+    
+
+    min_x, min_y = coords.min(axis=0)
+    max_x, max_y = coords.max(axis=0)
+    
+    if len(coords) > 10000:
+        sample_indices = np.random.choice(len(coords), 10000, replace=False)
+        sample_coords = coords[sample_indices]
+        tree_calc = cKDTree(sample_coords)
+        dists, _ = tree_calc.query(sample_coords, k=2)
+    else:
+        tree_calc = cKDTree(coords)
+        dists, _ = tree_calc.query(coords, k=2)
+        
+    avg_step = np.mean(dists[:, 1])
+    
+    new_step = avg_step * downscale_factor
+    
+    print(f"Original Step (approx): {avg_step:.2f}")
+    print(f"Target LR Step: {new_step:.2f}")
+    
+    x_range = np.arange(min_x - margin, max_x + margin + new_step, new_step)
+    y_range = np.arange(min_y - margin, max_y + margin + new_step, new_step)
+    grid_x, grid_y = np.meshgrid(x_range, y_range)
+    
+    grid_coords = np.vstack([grid_x.ravel(), grid_y.ravel()]).T
+    
+    print(f"Num of raw HD spots: {len(coords)}")
+    print(f"Num of coarse grid spots (before filtering): {len(grid_coords)}")
+    
+    tree = cKDTree(coords)
+
+    dist_threshold = new_step * 0.6 
+
+    dists_to_real, _ = tree.query(grid_coords, k=1)
+    
+    mask = dists_to_real < dist_threshold
+    final_coords = grid_coords[mask]
+    
+    print(f"Final LR coords num (Tissue Covered): {len(final_coords)}")
     
     return final_coords
 
 
 from scipy.interpolate import griddata
 
-def generate_sr_library_size(adata, sr_coords, mode='mean', k=5):
+def generate_sr_library_size(adata, sr_coords, mode='mean', k=0):
     """
-    为超分辨率坐标生成对应的 Library Size。
+    generate Library Size for super-res spots
     
     Args:
-        adata: 原始 AnnData
-        sr_coords: (N, 2) 新生成的超分辨率坐标
+        adata: raw AnnData
+        sr_coords: (N, 2) super-res coords
         mode: 
-            - 'mean': 使用全数据均值 (去除测序深度偏好，图最干净)
-            - 'median': 使用全数据中位数 (推荐，抗异常值)
-            - 'nearest': 最近邻 (会有马赛克块状感，不推荐)
-            - 'linear': 线性插值 (平滑保留细胞密度差异)
-        k: 只有在某些自定义插值逻辑下才用，这里主要依赖 griddata
+            - 'mean': Using the mean of all data (removes sequencing depth bias, resulting in the cleanest graph)
+            - 'median': Use the median of all data (recommended, robust against outliers)
+            - 'nearest': Nearest neighbor (will result in a blocky, pixelated appearance; not recommended)
+            - 'linear': Linear interpolation (smoothly preserves cell density differences)
+        k: This is only used under certain custom interpolation logic; it primarily relies on `griddata`.
     
     Returns:
         sr_lib_size: (N, 1) Torch Tensor
     """
-    # 1. 获取真实的 Library Size
-    # 优先从 obs 取，如果没有就现算
     if 'total_counts' in adata.obs.columns:
         real_lib_size = adata.obs['total_counts'].values
     else:
@@ -347,31 +395,25 @@ def generate_sr_library_size(adata, sr_coords, mode='mean', k=5):
     print(f"Generating Library Size with mode: {mode}")
     
     if mode == 'mean':
-        # 策略 A: 均值填充 (所有点一样)
         avg_val = np.mean(real_lib_size)
         sr_lib_size = np.full(len(sr_coords), avg_val)
         
     elif mode == 'median':
-        # 策略 B: 中位数填充 (所有点一样，更鲁棒)
         med_val = np.median(real_lib_size)
         sr_lib_size = np.full(len(sr_coords), med_val)
         
     elif mode == 'linear' or mode == 'cubic':
-        # 策略 C: 空间插值 (保留密度差异)
-        # 注意：griddata 在凸包之外的点会产生 nan，需要 fill_value
         avg_val = np.mean(real_lib_size)
         sr_lib_size = griddata(
             points=real_coords, 
             values=real_lib_size, 
             xi=sr_coords, 
             method=mode, 
-            fill_value=avg_val # 边缘外的点用均值填充
+            fill_value=avg_val 
         )
-        # 确保没有负数 (虽然插值通常不会产生负数)
         sr_lib_size = np.clip(sr_lib_size, a_min=1.0, a_max=None)
         
     elif mode == 'nearest':
-        # 策略 D: 最近邻
         sr_lib_size = griddata(
             points=real_coords, 
             values=real_lib_size, 
@@ -381,8 +423,30 @@ def generate_sr_library_size(adata, sr_coords, mode='mean', k=5):
         
     else:
         raise ValueError("Unknown mode")
+    if k > 0:
+        print(f'raw lib min={sr_lib_size.min()}, max={sr_lib_size.max()}')
+        sr_lib_size = sr_lib_size * k
 
-    # 转为 Tensor 格式 (N, 1) 适配模型输入
     sr_lib_size = torch.FloatTensor(sr_lib_size).unsqueeze(1)
     
     return sr_lib_size
+
+
+def construct_sr_adata(adata_raw, sr_expression, sr_latent, sr_coords, use_log1p=False):
+    if torch.is_tensor(sr_expression):
+        X_sr = sr_expression.detach().cpu().numpy()
+    else:
+        X_sr = sr_expression
+    if use_log1p:
+        X_sr = np.log1p(X_sr)
+    
+    adata_sr = sc.AnnData(X=X_sr)
+    adata_sr.var = adata_raw.var.copy()
+    adata_sr.obsm['spatial'] = sr_coords
+    adata_sr.obsm['latent'] = sr_latent
+    adata_sr.obs_names = [f"SR_{i}" for i in range(adata_sr.n_obs)]
+    
+    if 'spatial' in adata_raw.uns:
+        adata_sr.uns['spatial'] = adata_raw.uns['spatial'].copy()
+    
+    return adata_sr
