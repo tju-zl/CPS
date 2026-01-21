@@ -5,7 +5,6 @@ CPS: Mapping Physical Coordinates to High-Fidelity Spatial Transcriptomics via P
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 
-
 📖 Overview
 ---
 
