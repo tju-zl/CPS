@@ -9,7 +9,7 @@ CPS: A Cell Positioning System for Universal Spatial Transcriptomics Reconstruct
 ---
 
 ![](https://github.com/tju-zl/CPS/blob/main/overview_cps.png)
-We introduce CPS, a resolution-independent generative framework designed as a Cell Positioning System to reconstruct continuous tissue maps. CPS employs a novel topological-geometric distillation paradigm. The teacher network utilizes a scale-adaptive attention mechanism over parallel multi-hop neighborhoods, enabling the model to dynamically select the optimal effective receptive field—prioritizing local neighbors at tissue interfaces and global contexts in homogeneous regions. This topological intelligence is distilled into a coordinate-based Student network (Implicit Neural Representation), allowing for graph-free inference that generates context-aware gene expression solely from spatial coordinates.
+We introduce the Cell Positioning System (CPS), a context-aware implicit neural representation framework designed to map physical coordinates to high-fidelity spatial transcriptomics via a privileged multi-scale context distillation strategy. CPS treats multi-scale tissue niches as privileged information, employing a teacher network equipped with a multi-scale niche attention mechanism to capture adaptive biological interactions during training. This structural knowledge is explicitly distilled into a student coordinate network, enabling the generation of context-aware expression landscapes solely from spatial coordinates during inference.
 
 🚀 Reproduction of results
 ---
